@@ -108,10 +108,6 @@ def create_post():
     title = (data.get("title") or "").strip()
     body = (data.get("body") or "").strip()
 
-    # TODO 1: 校验
-    #   title 为空          -> return jsonify(error="title is required"), 400
-    #   len(title) > 200    -> return jsonify(error="title too long"), 400
-    #   len(body)  > 2000   -> return jsonify(error="body too long"), 400
     if not title:
         return jsonify(error="title is required!"), 400
     if len(title) > 200:
@@ -119,8 +115,6 @@ def create_post():
     if len(body) > 2000:
         return jsonify(error="body too long"), 400
 
-    # TODO 2: 作者是谁，只能从 token 里拿
-    #   提示: user_id = int(g.user["sub"])
     user_id = int(g.user["sub"])
 
     with closing(get_conn()) as conn, conn:
