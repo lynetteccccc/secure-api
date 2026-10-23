@@ -33,11 +33,28 @@ def create_user(username, password):
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     with closing(get_conn()) as conn, conn:
         conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)",
             (username, pw_hash),
+        )
+def create_post(user_id, title, body):
+    with closing(get_conn()) as conn, conn:
+        conn.execute(
+            "INSERT INTO posts (user_id, title, body) VALUES (?, ?, ?)",
+            (user_id, title, body),
         )
 
 if __name__ == "__main__":
     init_db()
     create_user("alice", "Password123!")
+
+    with closing(get_conn()) as conn, conn:
+        uid = conn.execute(
+            "SELECT id FROM users WHERE username = ?", ("alice",)
+        ).fetchone()[0]
+        posts = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+
+    if posts == 0:
+        create_post(uid, "Welcome", "first post by alice")
+        create_post(uid, "Second", "another post")
+
     print("db ready")
