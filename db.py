@@ -1,19 +1,17 @@
 import sqlite3
-
 import bcrypt
 
-DB_PATH = "app.db"
+from contextlib import closing
 
+DB_PATH = "app.db"
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def init_db():
-    conn = get_conn()
-    with conn:
+    with closing(get_conn()) as conn, conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -31,16 +29,13 @@ def init_db():
             """
         )
 
-
 def create_user(username, password):
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    conn = get_conn()
-    with conn:
+    with closing(get_conn()) as conn, conn:
         conn.execute(
             "INSERT INTO users (username, password_hash) VALUES (?, ?)",
             (username, pw_hash),
         )
-
 
 if __name__ == "__main__":
     init_db()
