@@ -98,7 +98,7 @@ survives with four rows; the payload is stored verbatim as text:
 ```
 posts count: 4
   id=4  title=x&#x27;,&#x27;y&#x27;); DROP TABLE posts;--
-  id=3  title=&lt;script&gt;alert(1)&lt;/script&gt;
+  id=3  title=<script>alert(1)</script>
   id=2  title=Second
   id=1  title=Welcome
 ```
@@ -284,10 +284,10 @@ as a working service.
 
 `.github/workflows/ci.yml` runs on every push to `main` and on every pull request:
 
-| Step | Tool                            | Purpose                                                                                 |
-| ---- | ------------------------------- | --------------------------------------------------------------------------------------- |
-| SAST | `bandit -r . -ll`               | flags risky constructs in the source (debug mode, `eval`, weak crypto, shell calls)     |
-| SCA  | `pip-audit -r requirements.txt` | matches pinned dependency versions against published advisories                         |
+| Step | Tool                            | Purpose                                                                             |
+| ---- | ------------------------------- | ----------------------------------------------------------------------------------- |
+| SAST | `bandit -r . -ll`               | flags risky constructs in the source (debug mode, `eval`, weak crypto, shell calls) |
+| SCA  | `pip-audit -r requirements.txt` | matches pinned dependency versions against published advisories                     |
 
 Both scanners run against the same pinned `requirements.txt` that a developer installs locally, so a green pipeline refers to the committed state rather than to a different one.
 
