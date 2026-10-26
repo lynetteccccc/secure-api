@@ -98,13 +98,13 @@ survives with four rows; the payload is stored verbatim as text:
 ```
 posts count: 4
   id=4  title=x&#x27;,&#x27;y&#x27;); DROP TABLE posts;--
-  id=3  title=<script>alert(1)</script>
+  id=3  title=&lt;script&gt;alert(1)&lt;/script&gt;
   id=2  title=Second
   id=1  title=Welcome
 ```
 
-A `DROP TABLE` that changes nothing is the clearest possible demonstration that the
-statement was never parsed as SQL.
+The table is unchanged, which shows that the payload was treated as data rather than as
+SQL.
 
 ### 3.2 XSS — output encoding
 
@@ -122,7 +122,7 @@ It is applied to `title`, `body` and `author` in `/api/data`, and to the values 
 
 **Evidence.** Submitting `<script>alert(1)</script>` stores the characters but returns them as `&lt;script&gt;alert(1)&lt;/script&gt;`; a browser renders text, not a script.
 
-**Nuance.** A JSON response is not executed by browsers, so this is defence in depth rather than the primary control: the primary control is contextual encoding at the render point, supported by a restrictive `Content-Security-Policy`. Server-side encoding still matters, because it protects naive clients that interpolate API values into HTML.
+**Scope of this control.** A JSON response is not executed by browsers, so this layer is defence in depth rather than the main control; the main control is contextual encoding at the point where the value is rendered, supported by a restrictive `Content-Security-Policy`. Server-side encoding still has a role, because it protects clients that insert API values into HTML without escaping them.
 
 ### 3.3 Authentication and authorisation
 
@@ -143,19 +143,19 @@ payload = {
 **Middleware.** `@require_auth` parses `Authorization: Bearer <token>` and decodes it before any handler runs. Three details are deliberate:
 
 1. **Algorithm whitelist.** `jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])` states which algorithm is acceptable, instead of trusting the `alg` field inside the token.
-   Without the whitelist, an attacker can present `alg: none`, or switch an RS256 token to HS256 signed with the public key (algorithm confusion).
+   Without the whitelist, a token with `alg: none`, or an RS256 token re-signed as HS256 with the public key, could be accepted.
 2. **Expiry and tampering are handled separately.** `ExpiredSignatureError` and
    `InvalidTokenError` both return `401`, but they are distinguishable in logs: one is an expired session, the other may be a forged token.
 3. **Identity comes from the token only.** `POST /api/posts` takes `user_id` from
    `g.user["sub"]`, never from the request body. Accepting a client-supplied `user_id` would let any authenticated user post as somebody else (IDOR / broken access control).
 
-**Username enumeration.** An unknown username and a wrong password return the same`{"error": "invalid credentials"}` with the same status, so responses cannot be used to discover which accounts exist.
+**Username enumeration.** An unknown username and a wrong password return the same `{"error": "invalid credentials"}` with the same status, so responses cannot be used to discover which accounts exist.
 
-**Secret management.** `JWT_SECRET` is read from the environment. The `dev-only-secret` fallback exists purely so the project runs locally without configuration; in any deployed environment the secret must be injected, because a published signing key makes every token forgeable.
+**Secret management.** `JWT_SECRET` is read from the environment. The `dev-only-secret` fallback exists purely so the project runs locally without configuration; in any deployed environment the secret has to be injected, since a published signing key makes every token forgeable.
 
-**Deliberately out of scope.** No rate limiting on `/auth/login`, no refresh tokens, no
+**Out of scope in this work.** No rate limiting on `/auth/login`, no refresh tokens, no
 token revocation list, and the dev server speaks plain HTTP. Each of these matters in
-production and is listed here rather than silently ignored.
+production and is listed here rather than left unmentioned.
 
 ---
 
@@ -174,7 +174,7 @@ application directory. The servlet tries to prevent code execution by rejecting 
 seen by the check as a directory-like name without a `.jsp` suffix, while the write lands
 on `1.jsp`. The uploaded JSP is then compiled and executed by the container, which gives command execution.
 
-The environment is started with `docker compose build && docker compose up -d` from the Vulhub directory; the base image ships with the dangerous parameter already inserted into `conf/web.xml`.
+The environment is started with `docker compose build && docker compose up -d` from the Vulhub directory; the base image already contains the parameter that enables writing in `conf/web.xml`.
 
 ---
 
@@ -218,10 +218,10 @@ curl -s -o - "http://localhost:8080/1.jsp?cmd=ls%20-la%20/"
 
 ## 6. Root cause analysis
 
-The vulnerability is best explained in three layers, because each layer suggests a
-different class of fix.
+The vulnerability is best explained in three layers, because each layer points to a
+different kind of fix.
 
-**Layer 1 — configuration.** The `readonly=false` parameter is not a Tomcat default; it was added explicitly. The Vulhub image injects it into `conf/web.xml` at build time:
+**Layer 1 — configuration.** The `readonly=false` parameter is not a Tomcat default; it was added explicitly. The Vulhub image inserts it into `conf/web.xml` at build time:
 
 ```dockerfile
 RUN cd /usr/local/tomcat/conf \
@@ -230,20 +230,16 @@ RUN cd /usr/local/tomcat/conf \
     && sed -i "$LINE i $ADDON" web.xml
 ```
 
-In other words the write capability was granted on purpose. A stock Tomcat answers the same`PUT` with `403`.
+The write capability is therefore a choice made by the environment rather than a default; a stock Tomcat answers the same `PUT` with `403`.
 
 **Layer 2 — insufficient validation.** Blocking `.jsp` by suffix is a blacklist over a
 string, not over the object that will actually be written. `1.jsp/` and `1.jsp` denote the
 same file to the file system but not to the string check, so the guard and the write
-disagree about what is being created. This is the same failure family as path traversal:
-**normalisation performed twice, by two components, with different rules.**
+disagree about what is being created. The same pattern appears in path traversal: normalisation is performed twice, by two components, with different rules.
 
-**Layer 3 — blast radius.** The container ran the servlet as `root`, so code execution was
-root-level inside the container. With a shared kernel and a mounted volume this is one step away from host compromise; without one it still means full control of the application and its data.
+**Layer 3 — the size of the impact.** The container runs the servlet as `root`, so the command execution was root-level inside the container. With a mounted host directory this would extend to the host; even without one it means full control of the application and its data.
 
-The combination explains why the CVSS score is high while the precondition is a
-configuration choice: severity measures the consequence (file write → RCE), not the
-likelihood of a stock installation being exposed.
+This also explains why the CVSS score is high although the precondition is a configuration choice: the score reflects the consequence, not the probability that a default installation is exposed.
 
 ---
 
@@ -258,9 +254,9 @@ docker compose build --no-cache
 docker compose up -d --force-recreate
 ```
 
-**Why this is effective.** The rejection now happens in the server's request handling before any file is created: `DefaultServlet` refuses `PUT` outright. The fix removes the primitive the exploit needs rather than filtering the payload that abuses it, so it does not depend on guessing which encodings an attacker will try.
+**Why this works.** The rejection now happens while the request is handled, before any file is created: `DefaultServlet` refuses `PUT` outright. The fix removes the primitive the exploit needs rather than filtering the payload that abuses it, so it does not depend on predicting which encoding an attacker will use.
 
-**Defence in depth (recommended, not applied here).** Upgrade to a release after 8.5.31, where the path handling that allows the trailing-slash bypass was tightened (the related Windows-only variant is CVE-2017-12617). Upgrading alone would not have fixed this environment, because the vulnerable parameter would still have been set — the configurationis the precondition, so the configuration is the fix. Additional hardening: run the container as a non-root user, mount the web application directory read-only, and place a WAF rule in front of `PUT` to `/` paths.
+**Defence in depth (recommended, not applied here).** Upgrading to a release after 8.5.31 tightens the path handling that allows the trailing-slash bypass (the related Windows-only variant is CVE-2017-12617). Upgrading alone would not have fixed this environment, because the vulnerable parameter would still be set: the configuration is the precondition, so the configuration is the fix. Further hardening would be to run the container as a non-root user, mount the web application directory read-only, and add a WAF rule for `PUT` to `/` paths.
 
 ---
 
@@ -279,8 +275,8 @@ docker compose up -d --force-recreate
 
 ![Home page still works after the fix](docs/w1-07-regression-ok.png)
 
-The regression check matters as much as the 403: a service that has been broken into
-returning errors is not a fixed service.
+The regression check matters as much as the 403: returning errors everywhere is not the same
+as a working service.
 
 ---
 
@@ -290,14 +286,14 @@ returning errors is not a fixed service.
 
 | Step | Tool                            | Purpose                                                                                 |
 | ---- | ------------------------------- | --------------------------------------------------------------------------------------- |
-| SAST | `bandit -r . -ll`               | flags dangerous constructs in the source (debug mode, `eval`, weak crypto, shell calls) |
+| SAST | `bandit -r . -ll`               | flags risky constructs in the source (debug mode, `eval`, weak crypto, shell calls)     |
 | SCA  | `pip-audit -r requirements.txt` | matches pinned dependency versions against published advisories                         |
 
-Both scanners run against the same pinned `requirements.txt` that a developer installs locally, so a green pipeline means the committed state was scanned, not a different one.
+Both scanners run against the same pinned `requirements.txt` that a developer installs locally, so a green pipeline refers to the committed state rather than to a different one.
 
-**Tool choice.** The lab manual suggests OWASP Dependency-Check or Snyk for SCA. `pip-audit` was used instead: it reads the same OSV/PyPA advisory data, runs without an account or a Java runtime, and keeps the job under a minute. `safety` was the other Python option in the manual, but its CLI now requires registration before it will run in a pipeline.
+**Tool choice.** The lab manual suggests OWASP Dependency-Check or Snyk for SCA. `pip-audit` was used instead: it reads the same OSV/PyPA advisory data, runs without an account or a Java runtime, and keeps the job under a minute. `safety`, the other Python option in the manual, requires an account before it will run in a pipeline.
 
-Current state — SAST found no issues (155 lines of code scanned, zero findings at any
+Current state — SAST found no issues (155 lines of code scanned, no findings at any
 severity), and SCA found no known vulnerabilities in the pinned dependencies:
 
 ![bandit: no issues identified](docs/w1-09-bandit-pass.png)
@@ -318,7 +314,7 @@ python db.py                # creates app.db and seeds a demo user
 python app.py               # serves on http://127.0.0.1:5000
 ```
 
-Demo credentials: `alice` / `Password123!` (development only — the seed is dempotent, so re-running `db.py` will not duplicate the user).
+Demo credentials: `alice` / `Password123!` (development only — the seed is idempotent, so re-running `db.py` will not duplicate the user).
 
 Health check: `curl http://127.0.0.1:5000/health` → `{"status":"ok"}`
 
